@@ -1,0 +1,14 @@
+https:
+  name: "https"
+  protocol: "tcp"
+  listen-addr: "0.0.0.0:8443"
+  target-addr-v4: "127.0.0.1:443"
+  target-addr-v6: "[::1]:443"
+  mark: 123
+  verbodity: 1
+  listeners: 1
+  udp-close-after: 60
+ssh:
+  listen-addr: "0.0.0.0:8022"
+  target-addr-v4: "127.0.0.1:22"
+  target-addr-v6: "[::1]:22"

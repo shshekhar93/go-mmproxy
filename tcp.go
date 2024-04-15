@@ -17,17 +17,17 @@ func tcpCopyData(dst net.Conn, src net.Conn, ch chan<- error) {
 	ch <- err
 }
 
-func tcpHandleConnection(conn net.Conn, logger *slog.Logger) {
+func tcpHandleConnection(conn net.Conn, opts options, logger *slog.Logger) {
 	defer conn.Close()
 	logger = logger.With(slog.String("remoteAddr", conn.RemoteAddr().String()),
 		slog.String("localAddr", conn.LocalAddr().String()))
 
-	if !CheckOriginAllowed(conn.RemoteAddr().(*net.TCPAddr).IP) {
+	if !CheckOriginAllowed(conn.RemoteAddr().(*net.TCPAddr).IP, opts) {
 		logger.Debug("connection origin not in allowed subnets", slog.Bool("dropConnection", true))
 		return
 	}
 
-	if Opts.Verbose > 1 {
+	if opts.Verbose > 1 {
 		logger.Debug("new connection")
 	}
 
@@ -50,13 +50,13 @@ func tcpHandleConnection(conn net.Conn, logger *slog.Logger) {
 		return
 	}
 
-	targetAddr := Opts.TargetAddr6
+	targetAddr := opts.TargetAddr6
 	if saddr == nil {
 		if netip.MustParseAddrPort(conn.RemoteAddr().String()).Addr().Is4() {
-			targetAddr = Opts.TargetAddr4
+			targetAddr = opts.TargetAddr4
 		}
 	} else if netip.MustParseAddrPort(saddr.String()).Addr().Is4() {
-		targetAddr = Opts.TargetAddr4
+		targetAddr = opts.TargetAddr4
 	}
 
 	clientAddr := "UNKNOWN"
@@ -64,13 +64,13 @@ func tcpHandleConnection(conn net.Conn, logger *slog.Logger) {
 		clientAddr = saddr.String()
 	}
 	logger = logger.With(slog.String("clientAddr", clientAddr), slog.String("targetAddr", targetAddr.String()))
-	if Opts.Verbose > 1 {
+	if opts.Verbose > 1 {
 		logger.Debug("successfully parsed PROXY header")
 	}
 
 	dialer := net.Dialer{LocalAddr: saddr}
 	if saddr != nil {
-		dialer.Control = DialUpstreamControl(saddr.(*net.TCPAddr).Port)
+		dialer.Control = DialUpstreamControl(saddr.(*net.TCPAddr).Port, opts)
 	}
 	upstreamConn, err := dialer.Dial("tcp", targetAddr.String())
 	if err != nil {
@@ -79,19 +79,19 @@ func tcpHandleConnection(conn net.Conn, logger *slog.Logger) {
 	}
 
 	defer upstreamConn.Close()
-	if Opts.Verbose > 1 {
+	if opts.Verbose > 1 {
 		logger.Debug("successfully established upstream connection")
 	}
 
 	if err := conn.(*net.TCPConn).SetNoDelay(true); err != nil {
 		logger.Debug("failed to set nodelay on downstream connection", "error", err, slog.Bool("dropConnection", true))
-	} else if Opts.Verbose > 1 {
+	} else if opts.Verbose > 1 {
 		logger.Debug("successfully set NoDelay on downstream connection")
 	}
 
 	if err := upstreamConn.(*net.TCPConn).SetNoDelay(true); err != nil {
 		logger.Debug("failed to set nodelay on upstream connection", "error", err, slog.Bool("dropConnection", true))
-	} else if Opts.Verbose > 1 {
+	} else if opts.Verbose > 1 {
 		logger.Debug("successfully set NoDelay on upstream connection")
 	}
 
@@ -115,14 +115,14 @@ func tcpHandleConnection(conn net.Conn, logger *slog.Logger) {
 	err = <-outErr
 	if err != nil {
 		logger.Debug("connection broken", "error", err, slog.Bool("dropConnection", true))
-	} else if Opts.Verbose > 1 {
+	} else if opts.Verbose > 1 {
 		logger.Debug("connection closing")
 	}
 }
 
-func TCPListen(listenConfig *net.ListenConfig, logger *slog.Logger, errors chan<- error) {
+func TCPListen(listenConfig *net.ListenConfig, opts options, logger *slog.Logger, errors chan<- error) {
 	ctx := context.Background()
-	ln, err := listenConfig.Listen(ctx, "tcp", Opts.ListenAddr.String())
+	ln, err := listenConfig.Listen(ctx, "tcp", opts.ListenAddr.String())
 	if err != nil {
 		logger.Error("failed to bind listener", "error", err)
 		errors <- err
@@ -139,6 +139,6 @@ func TCPListen(listenConfig *net.ListenConfig, logger *slog.Logger, errors chan<
 			return
 		}
 
-		go tcpHandleConnection(conn, logger)
+		go tcpHandleConnection(conn, opts, logger)
 	}
 }

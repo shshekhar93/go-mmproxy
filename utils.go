@@ -5,9 +5,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"net"
+	"net/netip"
 	"syscall"
+	"time"
 )
 
 type Protocol int
@@ -17,12 +21,12 @@ const (
 	UDP
 )
 
-func CheckOriginAllowed(remoteIP net.IP) bool {
-	if len(Opts.AllowedSubnets) == 0 {
+func CheckOriginAllowed(remoteIP net.IP, opts options) bool {
+	if len(opts.AllowedSubnets) == 0 {
 		return true
 	}
 
-	for _, ipNet := range Opts.AllowedSubnets {
+	for _, ipNet := range opts.AllowedSubnets {
 		if ipNet.Contains(remoteIP) {
 			return true
 		}
@@ -30,11 +34,11 @@ func CheckOriginAllowed(remoteIP net.IP) bool {
 	return false
 }
 
-func DialUpstreamControl(sport int) func(string, string, syscall.RawConn) error {
+func DialUpstreamControl(sport int, opts options) func(string, string, syscall.RawConn) error {
 	return func(network, address string, c syscall.RawConn) error {
 		var syscallErr error
 		err := c.Control(func(fd uintptr) {
-			if Opts.Protocol == "tcp" {
+			if opts.Protocol == "tcp" {
 				syscallErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_SYNCNT, 2)
 				if syscallErr != nil {
 					syscallErr = fmt.Errorf("setsockopt(IPPROTO_TCP, TCP_SYNCTNT, 2): %w", syscallErr)
@@ -58,15 +62,15 @@ func DialUpstreamControl(sport int) func(string, string, syscall.RawConn) error 
 				ipBindAddressNoPort := 24
 				syscallErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, ipBindAddressNoPort, 1)
 				if syscallErr != nil {
-					syscallErr = fmt.Errorf("setsockopt(SOL_SOCKET, IPPROTO_IP, %d): %w", Opts.Mark, syscallErr)
+					syscallErr = fmt.Errorf("setsockopt(SOL_SOCKET, IPPROTO_IP, %d): %w", opts.Mark, syscallErr)
 					return
 				}
 			}
 
-			if Opts.Mark != 0 {
-				syscallErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, Opts.Mark)
+			if opts.Mark != 0 {
+				syscallErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, opts.Mark)
 				if syscallErr != nil {
-					syscallErr = fmt.Errorf("setsockopt(SOL_SOCK, SO_MARK, %d): %w", Opts.Mark, syscallErr)
+					syscallErr = fmt.Errorf("setsockopt(SOL_SOCK, SO_MARK, %d): %w", opts.Mark, syscallErr)
 					return
 				}
 			}
@@ -85,4 +89,77 @@ func DialUpstreamControl(sport int) func(string, string, syscall.RawConn) error 
 		}
 		return syscallErr
 	}
+}
+
+func ParseAndValidateOptions(config *map[string]*options, logger *slog.Logger) error {
+	if config == nil {
+		logger.Error("Invalid configuration provided: nil")
+		return errors.New("Invalid configuration")
+	}
+
+	for name, opts := range *config {
+		logger = logger.With(slog.String("Name", name))
+
+		if opts == nil {
+			logger.Error("options is nil")
+			return errors.New("Invalid options in config: nil")
+		}
+
+		if opts.Name == "" {
+			opts.Name = name
+		}
+
+		if opts.Protocol != "tcp" && opts.Protocol != "udp" {
+			logger.Error("--protocol has to be one of udp, tcp", slog.String("protocol", opts.Protocol))
+			return errors.New("Invalid protocol")
+		}
+
+		if opts.Mark < 0 {
+			logger.Error("--mark has to be >= 0", slog.Int("mark", opts.Mark))
+			return errors.New("Invalid mark")
+		}
+
+		if opts.Verbose < 0 {
+			logger.Error("-v has to be >= 0", slog.Int("verbose", opts.Verbose))
+			return errors.New("Invalid verbosity")
+		}
+
+		if opts.Listeners < 1 {
+			logger.Error("--listeners has to be >= 1")
+			return errors.New("Invalid listeners count")
+		}
+
+		var err error
+		if opts.ListenAddr, err = netip.ParseAddrPort(opts.ListenAddrStr); err != nil {
+			logger.Error("listen address is malformed", "error", err)
+			return errors.New("Invalid listen address")
+		}
+		logger.Info("Parsed ipv4", slog.Any("ipv4", opts.ListenAddr))
+
+		if opts.TargetAddr4, err = netip.ParseAddrPort(opts.TargetAddr4Str); err != nil {
+			logger.Error("ipv4 target address is malformed", "error", err)
+			return errors.New("Invalid ipv4 address")
+		}
+		if !opts.TargetAddr4.Addr().Is4() {
+			logger.Error("ipv4 target address is not IPv4")
+			return errors.New("Invalid ipv4 address")
+		}
+
+		if opts.TargetAddr6, err = netip.ParseAddrPort(opts.TargetAddr6Str); err != nil {
+			logger.Error("ipv6 target address is malformed", "error", err)
+			return errors.New("Invalid ipv6 address")
+		}
+		if !opts.TargetAddr6.Addr().Is6() {
+			logger.Error("ipv6 target address is not IPv6")
+			return errors.New("Invalid ipv6 address")
+		}
+
+		if opts.udpCloseAfter < 0 {
+			logger.Error("--close-after has to be >= 0", slog.Int("close-after", opts.udpCloseAfter))
+			return errors.New("Invalid close after")
+		}
+		opts.UDPCloseAfter = time.Duration(opts.udpCloseAfter) * time.Second
+	}
+
+	return nil
 }
