@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net"
 	"net/netip"
 	"syscall"
@@ -20,6 +21,10 @@ const (
 	TCP Protocol = iota
 	UDP
 )
+
+var DEFAULT_ERROR_COUNT = 500
+var MIN_RESTART_DELAY = 500
+var MAX_RESTART_DELAY = 2000
 
 func CheckOriginAllowed(remoteIP net.IP, opts options) bool {
 	if len(opts.AllowedSubnets) == 0 {
@@ -159,7 +164,20 @@ func ParseAndValidateOptions(config *map[string]*options, logger *slog.Logger) e
 			return errors.New("Invalid close after")
 		}
 		opts.UDPCloseAfter = time.Duration(opts.udpCloseAfter) * time.Second
+
+		if opts.MaxErrorCount < 0 {
+			logger.Error("--max-error-count has to be >= 0", slog.Int("max-error-count", opts.MaxErrorCount))
+			return errors.New("Invalid max error count")
+		}
+
+		if opts.MaxErrorCount == 0 {
+			opts.MaxErrorCount = DEFAULT_ERROR_COUNT
+		}
 	}
 
 	return nil
+}
+
+func getRandomDelay() int {
+	return rand.Intn(MAX_RESTART_DELAY-MIN_RESTART_DELAY) + MIN_RESTART_DELAY
 }

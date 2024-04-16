@@ -33,6 +33,7 @@ func init() {
 		"Number of listener sockets that will be opened for the listen address (Linux 3.9+)")
 	flag.IntVar(&CommandlineOpts.udpCloseAfter, "close-after", 60, "Number of seconds after which UDP socket will be cleaned up")
 	flag.StringVar(&CommandlineOpts.ConfigPath, "config", "", "Config file path")
+	flag.IntVar(&CommandlineOpts.MaxErrorCount, "max-error-count", 1, "Number of listen errors after which the process will be terminated")
 }
 
 func listen(listenerNum int, opts options, errors chan<- error) {
@@ -141,8 +142,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger.Info("config is", slog.Any("config", config))
-
 	totalListenersCount := 0
 	for _, opts := range config {
 		totalListenersCount += opts.Listeners
@@ -155,8 +154,9 @@ func main() {
 		}
 	}
 
-	// Shouldn't we be listening for errors forever??
-	for i := 0; i < totalListenersCount; i++ {
+	for i := 0; i < CommandlineOpts.MaxErrorCount; i++ {
 		<-listenErrors
 	}
+	logger.Warn("Too many errors, exiting the process")
+	os.Exit(1)
 }

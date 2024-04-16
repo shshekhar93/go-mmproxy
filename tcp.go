@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"time"
 )
 
 func tcpCopyData(dst net.Conn, src net.Conn, ch chan<- error) {
@@ -126,6 +127,7 @@ func TCPListen(listenConfig *net.ListenConfig, opts options, logger *slog.Logger
 	if err != nil {
 		logger.Error("failed to bind listener", "error", err)
 		errors <- err
+		restartTCPWithRandomDelay(listenConfig, opts, logger, errors)
 		return
 	}
 
@@ -136,9 +138,21 @@ func TCPListen(listenConfig *net.ListenConfig, opts options, logger *slog.Logger
 		if err != nil {
 			logger.Error("failed to accept new connection", "error", err)
 			errors <- err
+
+			restartTCPWithRandomDelay(listenConfig, opts, logger, errors)
 			return
 		}
 
 		go tcpHandleConnection(conn, opts, logger)
 	}
+}
+
+func restartTCPWithRandomDelay(listenConfig *net.ListenConfig, opts options, logger *slog.Logger, errors chan<- error) {
+	delayTime := getRandomDelay()
+
+	logger.Info("Restarting the failed listener after delay", slog.Int("delay", delayTime))
+	time.Sleep(time.Millisecond * time.Duration(delayTime))
+
+	// Restart an alternative listener
+	go TCPListen(listenConfig, opts, logger, errors)
 }

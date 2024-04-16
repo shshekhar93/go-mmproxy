@@ -25,6 +25,7 @@ type options struct {
 	udpCloseAfter      int `yaml:"udp-close-after"`
 	UDPCloseAfter      time.Duration
 	ConfigPath         string
+	MaxErrorCount      int
 }
 
 func (opts *options) defaultsFrom(defaultOptions *options) {
@@ -51,5 +52,9 @@ func (opts *options) defaultsFrom(defaultOptions *options) {
 
 	if opts.udpCloseAfter == 0 {
 		opts.udpCloseAfter = defaultOptions.udpCloseAfter
+	}
+
+	if opts.MaxErrorCount == 0 {
+		opts.MaxErrorCount = defaultOptions.MaxErrorCount
 	}
 }

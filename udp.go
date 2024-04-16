@@ -136,6 +136,8 @@ func UDPListen(listenConfig *net.ListenConfig, opts options, logger *slog.Logger
 	if err != nil {
 		logger.Error("failed to bind listener", "error", err)
 		errors <- err
+
+		restartUDPWithRandomDelay(listenConfig, opts, logger, errors)
 		return
 	}
 
@@ -188,4 +190,14 @@ func UDPListen(listenConfig *net.ListenConfig, opts options, logger *slog.Logger
 			conn.logger.Error("failed to write to upstream socket", "error", err)
 		}
 	}
+}
+
+func restartUDPWithRandomDelay(listenConfig *net.ListenConfig, opts options, logger *slog.Logger, errors chan<- error) {
+	delayTime := getRandomDelay()
+
+	logger.Info("Restarting the failed listener after delay", slog.Int("delay", delayTime))
+	time.Sleep(time.Millisecond * time.Duration(delayTime))
+
+	// Restart an alternative listener
+	go UDPListen(listenConfig, opts, logger, errors)
 }
